@@ -1,0 +1,2 @@
+F:/clients/finance_tracker/android/app/.cxx/RelWithDebInfo/4910p341/x86/CMakeFiles/edit_cache.dir
+F:/clients/finance_tracker/android/app/.cxx/RelWithDebInfo/4910p341/x86/CMakeFiles/rebuild_cache.dir
