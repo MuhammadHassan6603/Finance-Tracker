@@ -19,21 +19,6 @@ class TransactionsTab extends StatefulWidget {
 
 class _TransactionsTabState extends State<TransactionsTab> {
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadTransactions();
-    });
-  }
-
-  void _loadTransactions() {
-    final viewModel = context.read<TransactionViewModel>();
-    if (!viewModel.isLoading) {
-      viewModel.loadTransactions();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     final localization = AppLocalizations.of(context);
     return Consumer<TransactionViewModel>(
@@ -61,15 +46,15 @@ class _TransactionsTabState extends State<TransactionsTab> {
       return const SizedBox();
     }
 
-    if (viewModel.transactions.isEmpty) {
+    if (viewModel.filteredTransactions.isEmpty) {
       return Center(child: Text(localization.noTransactionsFound));
     }
 
     return RefreshIndicator(
-      onRefresh: () => viewModel.loadTransactions(),
+      onRefresh: () => viewModel.loadTransactionsForMonth(viewModel.selectedMonth),
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: viewModel.transactions.length,
+        itemCount: viewModel.filteredTransactions.length,
         separatorBuilder: (context, index) => Divider(
           height: 0.1,
           color: Theme.of(context).brightness == Brightness.dark
@@ -77,7 +62,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
               : Colors.grey[200],
         ),
         itemBuilder: (context, index) {
-          final transaction = viewModel.transactions[index];
+          final transaction = viewModel.filteredTransactions[index];
           return _buildTransactionItem(context, transaction, viewModel);
         },
       ),

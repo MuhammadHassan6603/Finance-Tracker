@@ -15,6 +15,8 @@ class AccountCardModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? linkedBankAssetId;
+  final DateTime? firstStatementDate;
+  final int? statementDayOfMonth;
 
   AccountCardModel({
     required this.id,
@@ -29,6 +31,8 @@ class AccountCardModel {
     required this.updatedAt,
     required this.accountName,
     this.linkedBankAssetId,
+    this.firstStatementDate,
+    this.statementDayOfMonth,
   });
 
   // Create a new account card
@@ -42,6 +46,8 @@ class AccountCardModel {
     required Color color,
     required IconData icon,
     String? linkedBankAssetId,
+    DateTime? firstStatementDate,
+    int? statementDayOfMonth,
   }) {
     final now = DateTime.now();
     return AccountCardModel(
@@ -57,6 +63,8 @@ class AccountCardModel {
       updatedAt: now,
       accountName: accountName,
       linkedBankAssetId: linkedBankAssetId,
+      firstStatementDate: firstStatementDate,
+      statementDayOfMonth: statementDayOfMonth,
     );
   }
 
@@ -76,6 +84,8 @@ class AccountCardModel {
       updatedAt: (data['updatedAt'] as Timestamp).toDate(),
       accountName: data['accountName'] ?? '',
       linkedBankAssetId: data['linkedBankAssetId'],
+      firstStatementDate: data['firstStatementDate'] != null ? (data['firstStatementDate'] as Timestamp).toDate() : null,
+      statementDayOfMonth: data['statementDayOfMonth'],
     );
   }
 
@@ -93,6 +103,8 @@ class AccountCardModel {
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
       'linkedBankAssetId': linkedBankAssetId,
+      'firstStatementDate': firstStatementDate != null ? Timestamp.fromDate(firstStatementDate!) : null,
+      'statementDayOfMonth': statementDayOfMonth,
     };
   }
 
@@ -106,6 +118,8 @@ class AccountCardModel {
     Color? color,
     IconData? icon,
     String? linkedBankAssetId,
+    DateTime? firstStatementDate,
+    int? statementDayOfMonth,
   }) {
     return AccountCardModel(
       id: id,
@@ -120,6 +134,8 @@ class AccountCardModel {
       createdAt: createdAt,
       updatedAt: DateTime.now(),
       linkedBankAssetId: linkedBankAssetId ?? this.linkedBankAssetId,
+      firstStatementDate: firstStatementDate ?? this.firstStatementDate,
+      statementDayOfMonth: statementDayOfMonth ?? this.statementDayOfMonth,
     );
   }
 
@@ -135,6 +151,8 @@ class AccountCardModel {
       'color': color,
       'icon': icon,
       'linkedBankAssetId': linkedBankAssetId,
+      'firstStatementDate': firstStatementDate,
+      'statementDayOfMonth': statementDayOfMonth,
     };
   }
 }

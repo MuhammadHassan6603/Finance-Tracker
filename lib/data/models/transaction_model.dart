@@ -1,4 +1,5 @@
 import 'package:finance_tracker/core/constants/categories_list.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum TransactionType { income, expense }
 
@@ -51,29 +52,32 @@ class TransactionModel {
   }
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
+    DateTime parseDate(dynamic value) {
+      if (value is String) return DateTime.parse(value);
+      if (value is DateTime) return value;
+      if (value is Timestamp) return value.toDate();
+      throw Exception('Invalid date format');
+    }
+
     return TransactionModel(
       id: json['id'] as String,
       userId: json['userId'] as String,
-      amount: json['amount'] as double,
+      amount: (json['amount'] as num).toDouble(),
       type: TransactionType.values.firstWhere(
         (e) => e.toString() == json['type'],
       ),
       category: json['category'] as String,
       description: json['description'] as String,
-      date: DateTime.parse(json['date'] as String),
-      paymentMethod: json['paymentMethod'] as String, // Added
+      date: parseDate(json['date']),
+      paymentMethod: json['paymentMethod'] as String,
       attachmentUrl: json['attachmentUrl'] as String?,
       isRecurring: json['isRecurring'] as bool,
       recurringId: json['recurringId'] as String?,
-      recurringFrequency: json['recurringFrequency'] as String?, // Added
+      recurringFrequency: json['recurringFrequency'] as String?,
       splitWith: (json['splitWith'] as List<dynamic>?)
-          ?.cast<Map<String, dynamic>>(), // Added
-      createdAt: json['createdAt'] != null
-          ? DateTime.parse(json['createdAt'] as String)
-          : null,
-      updatedAt: json['updatedAt'] != null
-          ? DateTime.parse(json['updatedAt'] as String)
-          : null,
+          ?.cast<Map<String, dynamic>>(),
+      createdAt: json['createdAt'] != null ? parseDate(json['createdAt']) : null,
+      updatedAt: json['updatedAt'] != null ? parseDate(json['updatedAt']) : null,
     );
   }
 
@@ -85,15 +89,15 @@ class TransactionModel {
       'type': type.toString(),
       'category': category,
       'description': description,
-      'date': date.toIso8601String(),
+      'date': date,
       'paymentMethod': paymentMethod, // Added
       'attachmentUrl': attachmentUrl,
       'isRecurring': isRecurring,
       'recurringId': recurringId,
       'recurringFrequency': recurringFrequency, // Added
       'splitWith': splitWith, // Added
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
+      'createdAt': createdAt,
+      'updatedAt': updatedAt,
     };
   }
 

@@ -119,9 +119,11 @@ class _TransactionMonthSelectorState extends State<TransactionMonthSelector> {
   }
 
   void _handleMonthChange(int monthsToAdd) {
+    final newFocusedDay = DateTime(_focusedDay.year, _focusedDay.month + monthsToAdd, 1);
     setState(() {
-      _focusedDay = DateTime(_focusedDay.year, _focusedDay.month + monthsToAdd);
-      widget.onMonthChanged(_focusedDay);
+      _focusedDay = newFocusedDay;
     });
+    widget.onMonthChanged(newFocusedDay);
+    context.read<TransactionViewModel>().setSelectedMonth(newFocusedDay);
   }
 }

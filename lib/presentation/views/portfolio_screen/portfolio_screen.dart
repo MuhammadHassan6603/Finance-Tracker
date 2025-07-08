@@ -37,15 +37,15 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             AppHeaderText(
                 text: AppLocalizations.of(context).growthTrend, fontSize: 18),
             const Gap(16),
-            SizedBox(
-              height: 200,
-              child: LineChartWidget(
-                netWorthHistory: assetVM.netWorthHistory
-                    .map((h) => FlSpot(h.date.month.toDouble(), h.amount))
-                    .toList(),
-              ),
-            ),
-            const Gap(16),
+            // SizedBox(
+            //   height: 200,
+            //   child: LineChartWidget(
+            //     netWorthHistory: assetVM.netWorthHistory
+            //         .map((h) => FlSpot(h.date.month.toDouble(), h.amount))
+            //         .toList(),
+            //   ),
+            // ),
+            // const Gap(16),
             AssetsLiabilitiesSection(
               key: _sectionKey,
               onAssetAmountChanged: _handleAssetAmountChange,

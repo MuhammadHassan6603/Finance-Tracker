@@ -92,6 +92,42 @@ class _LoginViewContentState extends State<LoginViewContent> {
   Widget build(BuildContext context) {
     final viewModel = context.watch<AuthViewModel>();
     final local = AppLocalizations.of(context);
+    // Add persistent error message display
+    Widget errorWidget = const SizedBox.shrink();
+    if (viewModel.errorMessage.isNotEmpty) {
+      String displayError = viewModel.errorMessage;
+      // Network error friendly message
+      if (displayError.contains('network') ||
+          displayError.contains('Network') ||
+          displayError.contains('SocketException') ||
+          displayError.contains('Failed host lookup')) {
+        displayError = 'No internet connection. Please check your network and try again.';
+      } else if (displayError.contains('Exception:')) {
+        displayError = 'Something went wrong. Please try again.';
+      }
+      errorWidget = Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                displayError,
+                style: const TextStyle(color: Colors.red, fontSize: 14),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -109,6 +145,7 @@ class _LoginViewContentState extends State<LoginViewContent> {
                   const Gap(30),
                   AppHeaderText(text: local.welcomeBack),
                   const Gap(30),
+                  errorWidget,
                   CustomTextField(
                     controller: _emailController,
                     textCapitalization: TextCapitalization.none,

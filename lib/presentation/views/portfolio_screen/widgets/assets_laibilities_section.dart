@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'edit_asset_liability_dialog.dart';
 import 'package:gap/gap.dart';
-
 import '../../../../core/constants/theme_constants.dart';
 import '../../../../viewmodels/asset_liability_viewmodel.dart';
 import '../../../../viewmodels/account_card_viewmodel.dart';
@@ -25,6 +24,7 @@ class AssetsLiabilitiesSection extends StatefulWidget {
 
 class AssetsLiabilitiesSectionState extends State<AssetsLiabilitiesSection> {
   int _selectedTabIndex = 0;
+  int? _activeItemIndex; // Track which item is tapped for showing icons
 
   // Public getter for _selectedTabIndex
   int get selectedTabIndex => _selectedTabIndex;
@@ -78,7 +78,9 @@ class AssetsLiabilitiesSectionState extends State<AssetsLiabilitiesSection> {
             // List content
             _selectedTabIndex == 0
                 ? _buildAssetsList(viewModel.assets)
-                : _buildLiabilitiesList(viewModel.liabilities),
+                : _selectedTabIndex == 1
+                    ? _buildLiabilitiesList(viewModel.liabilities)
+                    : Container(),
           ],
         );
       },
@@ -143,9 +145,24 @@ class AssetsLiabilitiesSectionState extends State<AssetsLiabilitiesSection> {
   }
 
   Widget _buildLiabilitiesList(List<AssetLiabilityModel> liabilities) {
+    // Group liabilities by cardId (or name if cardId is null)
+    final Map<String, List<AssetLiabilityModel>> grouped = {};
+    for (final l in liabilities.where((l) => l.type == 'Credit Card')) {
+      final key = l.cardId ?? l.name;
+      if (!grouped.containsKey(key)) grouped[key] = [];
+      grouped[key]!.add(l);
+    }
+    // For each group, sum the amounts and display one entry per card
+    final List<AssetLiabilityModel> aggregated = grouped.entries.map((entry) {
+      final first = entry.value.first;
+      final totalAmount = entry.value.fold(0.0, (sum, l) => sum + l.amount);
+      return first.copyWith(amount: totalAmount);
+    }).toList();
+    // Add any other (non-credit card) liabilities as-is
+    final others = liabilities.where((l) => l.type != 'Credit Card').toList();
+    final allLiabilities = [...aggregated, ...others];
     return Column(
-      children:
-          liabilities.map((liability) => _buildListItem(liability)).toList(),
+      children: allLiabilities.map((liability) => _buildListItem(liability)).toList(),
     );
   }
 
@@ -222,7 +239,7 @@ class AssetsLiabilitiesSectionState extends State<AssetsLiabilitiesSection> {
       }
 
       // Delete the asset/liability
-      final success = await viewModel.deleteAssetLiability(item.id);
+      final success = await viewModel.deleteAssetLiability(item.id, accountCardVM: accountVM);
 
       if (success && mounted) {
         ToastUtils.showSuccessToast(
@@ -240,8 +257,12 @@ class AssetsLiabilitiesSectionState extends State<AssetsLiabilitiesSection> {
       final viewModel =
           Provider.of<AssetLiabilityViewModel>(context, listen: false);
       final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
-      return Container(
+      // Remove trailing icons, use onTap for popup
+      return GestureDetector(
+        onTap: () {
+          _showActionSheet(context, item);
+        },
+        child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
           color: isDarkMode ? ThemeConstants.cardDark : Colors.white,
@@ -291,22 +312,63 @@ class AssetsLiabilitiesSectionState extends State<AssetsLiabilitiesSection> {
               ),
             ],
           ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.edit),
-                onPressed: () => _showEditDialog(item),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete),
-                color: Colors.red,
-                onPressed: () => _showDeleteDialog(item),
-              ),
-            ],
+            // No trailing icons
+            trailing: null,
           ),
         ),
       );
     });
+  }
+
+  void _showActionSheet(BuildContext context, AssetLiabilityModel item) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Edit'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _showEditDialog(item);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete', style: TextStyle(color: Colors.red)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _showDeleteDialog(item);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+      );
+  }
+
+  // Helper to get the flattened list for liabilities (since they are grouped/aggregated)
+  List<AssetLiabilityModel> _getLiabilitiesList(List<AssetLiabilityModel> liabilities) {
+    final Map<String, List<AssetLiabilityModel>> grouped = {};
+    for (final l in liabilities.where((l) => l.type == 'Credit Card')) {
+      final key = l.cardId ?? l.name;
+      if (!grouped.containsKey(key)) grouped[key] = [];
+      grouped[key]!.add(l);
+    }
+    final List<AssetLiabilityModel> aggregated = grouped.entries.map((entry) {
+      final first = entry.value.first;
+      final totalAmount = entry.value.fold(0.0, (sum, l) => sum + l.amount);
+      return first.copyWith(amount: totalAmount);
+    }).toList();
+    final others = liabilities.where((l) => l.type != 'Credit Card').toList();
+    return [...aggregated, ...others];
   }
 }

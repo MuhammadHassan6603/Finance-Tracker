@@ -6,6 +6,7 @@ import '../core/constants/console.dart';
 import 'auth_viewmodel.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../viewmodels/account_card_viewmodel.dart';
 
 class NetWorthHistory {
   final DateTime date;
@@ -195,13 +196,27 @@ class AssetLiabilityViewModel extends ChangeNotifier {
     }
   }
 
-  Future<bool> deleteAssetLiability(String id) async {
+  Future<bool> deleteAssetLiability(String id, {AccountCardViewModel? accountCardVM}) async {
     if (_disposed) return false;
 
     try {
       _isLoading = true;
       _error = null;
       notifyListeners();
+
+      // Find the liability to be deleted
+      final liabilityIndex = _items.indexWhere((item) => item.id == id);
+      if (liabilityIndex != -1) {
+        final liability = _items[liabilityIndex];
+        if (!liability.isAsset && liability.type == 'Credit Card' && liability.cardId != null && accountCardVM != null) {
+          final cardIndex = accountCardVM.accountCards.indexWhere((c) => c.id == liability.cardId);
+          if (cardIndex != -1) {
+            final card = accountCardVM.accountCards[cardIndex];
+            final updatedCard = card.copyWith(balance: card.balance + liability.amount);
+            await accountCardVM.updateAccountCard(updatedCard);
+          }
+        }
+      }
 
       await _repository.deleteAssetLiability(id);
       return true;

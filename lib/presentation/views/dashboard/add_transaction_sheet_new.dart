@@ -298,7 +298,26 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
   Widget _buildTransferForm() {
     final accountViewModel = context.watch<AccountCardViewModel>();
+    final assetLiabilityViewModel = context.watch<AssetLiabilityViewModel>();
     final local = AppLocalizations.of(context);
+
+    // Find the selected credit card's outstanding liability
+    double creditCardOutstanding = 0.0;
+    bool toAccountIsCreditCard = false;
+    if (toAccount != null) {
+      final toCardIndex = accountViewModel.accountCards.indexWhere((card) => card.id == toAccount);
+      if (toCardIndex != -1) {
+        final toCard = accountViewModel.accountCards[toCardIndex];
+        if (toCard.type == 'Credit Card') {
+          toAccountIsCreditCard = true;
+          // Sum all active liabilities for this card
+          creditCardOutstanding = assetLiabilityViewModel.liabilities
+            .where((l) => l.cardId == toCard.id && l.type == 'Credit Card' && l.isActive)
+            .fold(0.0, (sum, l) => sum + l.amount);
+        }
+      }
+    }
+
     return Column(
       children: [
         DropdownButtonFormField<String>(
@@ -404,9 +423,32 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               }
             }
 
+            // If transferring to a credit card, validate against outstanding
+            if (toAccountIsCreditCard) {
+              if (creditCardOutstanding == 0) {
+                return 'No outstanding balance to repay on this credit card.';
+              }
+              if (amount > creditCardOutstanding) {
+                return 'You can only repay up to the outstanding amount spent on this credit card.';
+              }
+            }
+
             return null;
           },
         ),
+        if (toAccountIsCreditCard && creditCardOutstanding > 0) ...[
+          const Gap(4),
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Text(
+              'Outstanding to repay: ${Helpers.storeCurrency(context)}${creditCardOutstanding.toStringAsFixed(2)}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.orange,
+                    fontSize: 12,
+                  ),
+            ),
+          ),
+        ],
         const Gap(16),
         _buildDescriptionField(),
         const Gap(16),
@@ -517,12 +559,23 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
   Widget _buildDescriptionField() {
     final local = AppLocalizations.of(context);
-    return CustomTextField(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CustomTextField(
       controller: _descriptionController,
       labelText: local.description,
       hintText: local.enterDescription,
       icon: Iconsax.note_1_bold,
       maxLines: 3,
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return 'Please enter a description';
+            }
+            return null;
+          },
+        ),
+      ],
     );
   }
 
@@ -806,6 +859,26 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             );
           }
 
+          // If transferring to a credit card, reduce its liability
+          if (destinationAccount.type == 'Credit Card') {
+            // Get all active liabilities for this card
+            final liabilities = assetViewModel.liabilities
+                .where((l) => l.cardId == destinationAccount.id && l.type == 'Credit Card' && l.isActive)
+                .toList();
+            double remaining = amount;
+            for (final liability in liabilities) {
+              if (remaining <= 0) break;
+              final pay = remaining > liability.amount ? liability.amount : remaining;
+              final newAmount = liability.amount - pay;
+              final updated = liability.recordHistory(newAmount >= 0 ? newAmount : 0);
+              await assetViewModel.updateAssetLiability(updated);
+              if (updated.amount == 0) {
+                await assetViewModel.deleteAssetLiability(updated.id);
+              }
+              remaining -= pay;
+            }
+          }
+
           // Save both transactions
           await viewModel.addTransaction(withdrawalTransaction);
           await viewModel.addTransaction(depositTransaction);
@@ -862,22 +935,40 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
             // If it's a credit card expense, add it to liabilities
             if (!isIncome && selectedCard.type == 'Credit Card') {
-              // Create a new liability for the credit card expense
+              // Aggregate liability for this card
+              final liabilityVM = context.read<AssetLiabilityViewModel>();
+              AssetLiabilityModel? existingLiability;
+              for (final l in liabilityVM.liabilities) {
+                if (l.cardId == selectedCard.id && l.isActive && l.type == 'Credit Card') {
+                  existingLiability = l;
+                  break;
+                }
+              }
+              if (existingLiability != null) {
+                // Update existing liability
+                final updatedLiability = existingLiability.copyWith(
+                  amount: existingLiability.amount + amount,
+                  updatedAt: DateTime.now(),
+                  name: selectedCard.name,
+                );
+                await liabilityVM.updateAssetLiability(updatedLiability);
+              } else {
+                // Create a new liability for this card
               final liability = AssetLiabilityModel(
                 id: const Uuid().v4(),
                 userId: viewModel.currentUserId ?? '',
                 isAsset: false,
                 type: 'Credit Card',
                 amount: amount,
-                name: _descriptionController.text,
+                  name: selectedCard.name,
                 startDate: selectedDate,
                 createdAt: DateTime.now(),
                 updatedAt: DateTime.now(),
                 isActive: true,
                 cardId: selectedCard.id,
               );
-
-              await assetViewModel.createAssetLiability(liability);
+                await liabilityVM.createAssetLiability(liability);
+              }
             }
           }
 

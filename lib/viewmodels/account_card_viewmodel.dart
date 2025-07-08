@@ -5,6 +5,7 @@ import '../data/repositories/account_card_repository.dart';
 import '../core/constants/console.dart';
 import '../viewmodels/auth_viewmodel.dart';
 import 'dart:async';
+import '../viewmodels/credit_card_statement_viewmodel.dart';
 
 class AccountCardViewModel extends ChangeNotifier {
   final AccountCardRepository _repository;
@@ -77,6 +78,8 @@ class AccountCardViewModel extends ChangeNotifier {
     required Color color,
     required IconData icon,
     String? linkedBankAssetId,
+    DateTime? firstStatementDate,
+    int? statementDayOfMonth,
   }) async {
     console('DEBUG: Creating account card with user ID: $currentUserId',
         type: DebugType.info);
@@ -106,6 +109,8 @@ class AccountCardViewModel extends ChangeNotifier {
         color: color,
         icon: icon,
         linkedBankAssetId: linkedBankAssetId,
+        firstStatementDate: firstStatementDate,
+        statementDayOfMonth: statementDayOfMonth,
       );
 
       console('DEBUG: Created AccountCardModel with ID: ${newAccountCard.id}',

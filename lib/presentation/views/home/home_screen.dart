@@ -8,6 +8,8 @@ import 'package:finance_tracker/presentation/views/home/widgets/upcoming_card_wi
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../viewmodels/account_card_viewmodel.dart';
+import '../../../viewmodels/credit_card_statement_viewmodel.dart';
 import '../../../viewmodels/transaction_viewmodel.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,6 +20,28 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Trigger statement check after build
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final accountCardVM = context.read<AccountCardViewModel>();
+      final transactionVM = context.read<TransactionViewModel>();
+      final statementVM = CreditCardStatementViewModel();
+      
+      // First, create initial statements for existing credit cards
+      for (final card in accountCardVM.accountCards.where((c) => c.type == 'Credit Card')) {
+        await statementVM.createInitialStatementForCard(card, card.balance);
+      }
+      
+      // Then check and close statements
+      await statementVM.checkAndCloseStatementsForCards(
+        accountCardVM.accountCards,
+        transactionVM.transactions,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return const SafeArea(

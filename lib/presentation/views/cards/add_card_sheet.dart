@@ -11,6 +11,8 @@ import '../../../viewmodels/account_card_viewmodel.dart';
 import '../../../data/models/account_card_model.dart';
 import '../../../core/utils/motion_toast.dart';
 import '../../../viewmodels/asset_liability_viewmodel.dart';
+import '../../../data/models/asset_liability_model.dart';
+import 'dart:math' as num;
 
 class AddCardSheet extends StatefulWidget {
   final AccountCardModel? card;
@@ -32,6 +34,7 @@ class _AddCardSheetState extends State<AddCardSheet> {
   final _numberController = TextEditingController();
   final _accountNameController = TextEditingController();
   final _balanceController = TextEditingController();
+  final _unpaidAmountController = TextEditingController();
 
   late String _cardType;
   late Color _cardColor;
@@ -39,6 +42,8 @@ class _AddCardSheetState extends State<AddCardSheet> {
   bool _isProcessing = false;
   String? _linkedBankAssetId;
   bool _isBalanceLocked = false;
+  DateTime? _firstStatementDate; // for credit card statement
+  int? _statementDayOfMonth;
 
   @override
   void initState() {
@@ -50,6 +55,10 @@ class _AddCardSheetState extends State<AddCardSheet> {
     _balanceController.text = (widget.card?.balance ?? 0.0).toString();
     _cardColor = widget.card?.color ?? Colors.blue;
     _cardIcon = widget.card?.icon ?? Icons.account_balance;
+    if (widget.isEditing && widget.card != null && widget.card!.type == 'Credit Card') {
+      _firstStatementDate = widget.card!.firstStatementDate;
+      _statementDayOfMonth = widget.card!.statementDayOfMonth;
+    }
   }
 
   @override
@@ -58,6 +67,7 @@ class _AddCardSheetState extends State<AddCardSheet> {
     _accountNameController.dispose();
     _numberController.dispose();
     _balanceController.dispose();
+    _unpaidAmountController.dispose();
     super.dispose();
   }
 
@@ -174,6 +184,58 @@ class _AddCardSheetState extends State<AddCardSheet> {
                   SizedBox(height: 16,),
                 _buildBalanceField(),
                 const SizedBox(height: 16),
+                if (_cardType == 'Credit Card')
+                  CustomTextField(
+                    controller: _unpaidAmountController,
+                    labelText: 'Unpaid Amount (optional)',
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value != null && value.isNotEmpty) {
+                        final n = double.tryParse(value);
+                        if (n == null || n < 0) {
+                          return 'Please enter a valid number';
+                        }
+                        // Check if unpaid amount exceeds the card limit
+                        final cardLimit = double.tryParse(_balanceController.text) ?? 0.0;
+                        if (n > cardLimit) {
+                          return 'Unpaid amount cannot exceed card limit';
+                        }
+                      }
+                      return null;
+                    },
+                    onChanged: (value) {
+                      // Trigger rebuild to update the helper text
+                      setState(() {});
+                    },
+                  ),
+                if (_cardType == 'Credit Card' && _unpaidAmountController.text.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 12),
+                    child: Text(
+                      'Available balance after deduction: ${_calculateAvailableBalance()}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.blue,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+                if (_cardType == 'Credit Card' && !widget.isEditing) ...[
+                  const SizedBox(height: 16),
+                  _buildStatementDatePicker(context),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 12),
+                    child: Text(
+                      'Select the first statement generation date (within 45 days from today). All transactions before this date will be included in the first statement. This date cannot be changed later.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.orange,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
                 _buildColorSelector(),
                 const SizedBox(height: 16),
                 _buildIconSelector(),
@@ -370,6 +432,13 @@ class _AddCardSheetState extends State<AddCardSheet> {
     );
   }
 
+  String _calculateAvailableBalance() {
+    final cardLimit = double.tryParse(_balanceController.text) ?? 0.0;
+    final unpaidAmount = double.tryParse(_unpaidAmountController.text) ?? 0.0;
+    final availableBalance = cardLimit - unpaidAmount;
+    return availableBalance.toStringAsFixed(2);
+  }
+
   Widget _buildBalanceField() {
     final local = AppLocalizations.of(context);
     return CustomTextField(
@@ -388,7 +457,57 @@ class _AddCardSheetState extends State<AddCardSheet> {
         }
         return null;
       },
+      onChanged: (value) {
+        // Trigger rebuild to update the helper text for unpaid amount
+        setState(() {});
+      },
       readOnly: _linkedBankAssetId != null,
+    );
+  }
+
+  Widget _buildStatementDatePicker(BuildContext context) {
+    final local = AppLocalizations.of(context);
+    final now = DateTime.now();
+    final minDate = now.add(const Duration(days: 1));
+    final maxDate = now.add(const Duration(days: 45));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('First Statement Generation Date', style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _firstStatementDate ?? minDate,
+              firstDate: minDate,
+              lastDate: maxDate,
+            );
+            if (picked != null) {
+              setState(() {
+                _firstStatementDate = picked;
+                _statementDayOfMonth = picked.day;
+              });
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(_firstStatementDate == null
+                    ? 'Select date'
+                    : '${_firstStatementDate!.day}/${_firstStatementDate!.month}/${_firstStatementDate!.year}'),
+                const Icon(Icons.calendar_today, size: 18),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -396,6 +515,10 @@ class _AddCardSheetState extends State<AddCardSheet> {
     final local = AppLocalizations.of(context);
     if (!(_formKey.currentState?.validate() ?? false)) {
       console('DEBUG: Form validation failed');
+      return;
+    }
+    if (_cardType == 'Credit Card' && !widget.isEditing && _firstStatementDate == null) {
+      ToastUtils.showErrorToast(context, title: 'Error', description: 'Please select a first statement generation date.');
       return;
     }
 
@@ -427,21 +550,73 @@ class _AddCardSheetState extends State<AddCardSheet> {
           color: _cardColor,
           icon: _cardIcon,
           linkedBankAssetId: _linkedBankAssetId,
+          firstStatementDate: _firstStatementDate,
+          statementDayOfMonth: _statementDayOfMonth,
         );
         
         success = await viewModel.updateAccountCard(updatedCard);
       } else {
-        // Create a new card with the linkedBankAssetId
+        // Calculate the final balance for credit cards
+        double finalBalance = double.parse(_balanceController.text);
+        
+        // If it's a credit card and unpaid amount is provided, deduct it from the balance
+        if (_cardType == 'Credit Card' && _unpaidAmountController.text.isNotEmpty) {
+          final unpaidAmount = double.tryParse(_unpaidAmountController.text) ?? 0.0;
+          if (unpaidAmount > 0) {
+            finalBalance -= unpaidAmount;
+          }
+        }
+        
+        // Create a new card with the linkedBankAssetId and statement fields
         success = await viewModel.createAccountCard(
           accountName: _accountNameController.text,
           name: _nameController.text,
           number: _numberController.text,
           type: _cardType,
-          balance: double.parse(_balanceController.text),
+          balance: finalBalance,
           color: _cardColor,
           icon: _cardIcon,
           linkedBankAssetId: _linkedBankAssetId,
+          firstStatementDate: _firstStatementDate,
+          statementDayOfMonth: _statementDayOfMonth,
         );
+        
+        // If unpaid amount is set, create a liability
+        if (success && _cardType == 'Credit Card' && _unpaidAmountController.text.isNotEmpty) {
+          final unpaidAmount = double.tryParse(_unpaidAmountController.text) ?? 0.0;
+          if (unpaidAmount > 0) {
+            final assetLiabilityVM = context.read<AssetLiabilityViewModel>();
+            final newCard = viewModel.accountCards.firstWhere((c) =>
+              c.name == _nameController.text &&
+              c.number == _numberController.text &&
+              c.type == 'Credit Card');
+            final now = DateTime.now();
+            final dueDate = now.add(const Duration(days: 30));
+            await assetLiabilityVM.createAssetLiability(
+              AssetLiabilityModel(
+                id: UniqueKey().toString(),
+                userId: viewModel.currentUserId ?? '',
+                isAsset: false,
+                type: 'Credit Card',
+                amount: unpaidAmount,
+                name: newCard.name,
+                startDate: now,
+                interestRate: 0.0,
+                paymentSchedule: 'One-time',
+                attachments: [],
+                trackingPreferences: [],
+                createdAt: now,
+                updatedAt: now,
+                isActive: true,
+                history: [
+                  {'amount': unpaidAmount, 'timestamp': now},
+                ],
+                description: 'Unpaid amount on card creation',
+                cardId: newCard.id,
+              ),
+            );
+          }
+        }
       }
 
       if (success) {

@@ -25,15 +25,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
   DateTime _focusedDay = DateTime.now();
   int _selectedTabIndex = 0;
   late List<String> _tabs;
+  bool _didLoadInitial = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context
-          .read<TransactionViewModel>()
-          .loadTransactionsForMonth(_focusedDay);
-    });
   }
 
   @override
@@ -44,6 +40,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
       AppLocalizations.of(context).report,
       AppLocalizations.of(context).settleUp,
     ];
+    if (!_didLoadInitial) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<TransactionViewModel>().setSelectedMonth(_focusedDay);
+      });
+      _didLoadInitial = true;
+    }
   }
 
   @override
@@ -56,11 +58,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
             // Month Selector
             TransactionMonthSelector(
               focusedDay: _focusedDay,
-              onMonthChanged: (newDate) {
+              onMonthChanged: (newDate) async {
                 setState(() => _focusedDay = newDate);
-                context
-                    .read<TransactionViewModel>()
-                    .loadTransactionsForMonth(newDate);
+                // FIXED: Now properly awaits the Future
+                await context.read<TransactionViewModel>().setSelectedMonth(newDate);
               },
             ),
 
@@ -123,10 +124,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: ElevatedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           setState(() {
                             _selectedTabIndex = entry.key;
                           });
+                          // Refresh data when tab changes
+                          await context.read<TransactionViewModel>().refreshCurrentMonth();
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isSelected

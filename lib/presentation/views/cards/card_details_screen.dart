@@ -11,6 +11,11 @@ import '../../../data/models/account_card_model.dart';
 import '../../../viewmodels/asset_liability_viewmodel.dart';
 import '../../../data/models/asset_liability_model.dart';
 import 'add_card_sheet.dart';
+import 'package:uuid/uuid.dart';
+import '../../../data/models/transaction_model.dart';
+import '../../../viewmodels/transaction_viewmodel.dart';
+import 'package:collection/collection.dart';
+import 'credit_card_statements_screen.dart';
 
 class CardDetailsScreen extends StatefulWidget {
   final AccountCardModel card;
@@ -51,16 +56,18 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
           .where((l) => l.type == 'Credit Card' && l.cardId == card.id && l.isActive)
           .toList();
       totalToRepay = cardLiabilities.fold(0.0, (sum, l) => sum + l.amount);
-      // Calculate repaid as sum of all history entries for this card's liabilities
+      // Calculate repaid as sum of all repayments (positive increases in amount in history)
       totalRepaid = cardLiabilities.fold(0.0, (sum, l) {
-        if (l.history.isEmpty) return sum;
-        final paid = l.history.fold<double>(0.0, (hSum, entry) {
-          final oldAmount = (entry['amount'] as num?)?.toDouble() ?? 0.0;
-          // If amount decreased, it's a repayment
-          final diff = (l.amount < oldAmount) ? (oldAmount - l.amount) : 0.0;
-          return hSum + diff;
-        });
-        return sum + paid;
+        if (l.history.length < 2) return sum;
+        double repaid = 0.0;
+        for (int i = 1; i < l.history.length; i++) {
+          final prev = (l.history[i - 1]['amount'] as num?)?.toDouble() ?? 0.0;
+          final curr = (l.history[i]['amount'] as num?)?.toDouble() ?? 0.0;
+          if (curr < prev) {
+            repaid += (prev - curr);
+          }
+        }
+        return sum + repaid;
       });
     }
 
@@ -85,6 +92,23 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
           children: [
             _buildCardPreview(),
             const SizedBox(height: 20,),
+            if (isCreditCard) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CreditCardStatementsScreen(card: card),
+                      ),
+                    );
+                  },
+                  child: const Text('View Statements'),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
             _buildCardDetails(context),
             if (isCreditCard) ...[
               const SizedBox(height: 24),
@@ -228,14 +252,14 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                 Text('${Helpers.storeCurrency(context)}${totalToRepay.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
               ],
             ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(local.amountRepaid, style: Theme.of(context).textTheme.bodyMedium),
-                Text('${Helpers.storeCurrency(context)}${totalRepaid.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-              ],
-            ),
+            // const SizedBox(height: 8),
+            // Row(
+            //   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            //   children: [
+            //     Text(local.amountRepaid, style: Theme.of(context).textTheme.bodyMedium),
+            //     Text('${Helpers.storeCurrency(context)}${totalRepaid.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            //   ],
+            // ),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -258,6 +282,14 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
   final local = AppLocalizations.of(context);
   final controller = TextEditingController();
   String? errorText;
+    final assetLiabilityVM = context.read<AssetLiabilityViewModel>();
+    final accountCardVM = context.read<AccountCardViewModel>();
+    // Use only bank assets as repayment sources
+    final repaySources = assetLiabilityVM.assets.where((a) => a.type == 'Bank').toList();
+    String? selectedSourceId;
+    double selectedSourceBalance = 0.0;
+    String? sourceErrorText;
+
   showDialog(
     context: context,
     builder: (dialogContext) {
@@ -271,6 +303,35 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
               children: [
                 Text('${local.amountToRepay}: ${Helpers.storeCurrency(context)}${maxAmount.toStringAsFixed(2)}'),
                 const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    decoration: InputDecoration(
+                      labelText: 'Select Bank Asset to Repay',
+                    ),
+                    value: selectedSourceId,
+                    items: repaySources.map((asset) => DropdownMenuItem(
+                      value: asset.id,
+                      child: Text(
+                        '${asset.name} (${Helpers.storeCurrency(context)}${asset.amount.toStringAsFixed(2)})',
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    )).toList(),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        selectedSourceId = value;
+                        final src = repaySources.firstWhere((a) => a.id == value);
+                        selectedSourceBalance = src.amount;
+                        sourceErrorText = null;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a bank asset' : null,
+                  ),
+                  if (selectedSourceId != null) ...[
+                    const SizedBox(height: 8),
+                    Text('Available: ${Helpers.storeCurrency(context)}${selectedSourceBalance.toStringAsFixed(2)}',
+                      style: TextStyle(color: Colors.blueGrey, fontSize: 13)),
+                  ],
+                  SizedBox(height: 12,),
                 TextField(
                   controller: controller,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -282,12 +343,19 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                     if (errorText != null) {
                       setDialogState(() => errorText = null);
                     }
+                      if (sourceErrorText != null) {
+                        setDialogState(() => sourceErrorText = null);
+                      }
                   },
                 ),
                 if (errorText != null) ...[
                   const SizedBox(height: 8),
                   Text(errorText!, style: const TextStyle(color: Colors.red, fontSize: 13)),
                 ],
+                  if (sourceErrorText != null) ...[
+                    const SizedBox(height: 8),
+                    Text(sourceErrorText!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                  ],
               ],
             ),
             actions: [
@@ -300,6 +368,11 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                     ? null
                     : () async {
                         final entered = double.tryParse(controller.text) ?? 0.0;
+                          if (selectedSourceId == null) {
+                            setDialogState(() => sourceErrorText = 'Please select a bank asset to repay from.');
+                            return;
+                          }
+                          final src = repaySources.firstWhere((a) => a.id == selectedSourceId);
                         if (entered <= 0) {
                           setDialogState(() => errorText = local.pleaseEnterAValidAmount);
                           return;
@@ -308,24 +381,70 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                           setDialogState(() => errorText = local.amountExceedsRepay);
                           return;
                         }
-                        
+                          if (entered > src.amount) {
+                            setDialogState(() => sourceErrorText = 'Insufficient balance in the selected bank asset.');
+                            return;
+                          }
                         // Store the parent context before closing dialog
                         final parentContext = this.context;
-                        
                         Navigator.pop(dialogContext);
                         setState(() => _isRepayLoading = true);
+                          // Deduct from selected bank asset
+                          final updatedAsset = src.copyWith(amount: src.amount - entered);
+                          await assetLiabilityVM.updateAssetLiability(updatedAsset);
+                          // Deduct from linked debit card if any
+                          final linkedCard = accountCardVM.accountCards.firstWhereOrNull(
+                            (card) => card.linkedBankAssetId == src.id,
+                          );
+                          if (linkedCard != null) {
+                            final updatedCard = linkedCard.copyWith(balance: linkedCard.balance - entered);
+                            await accountCardVM.updateAccountCard(updatedCard);
+                          }
+                          // Repay the credit card liability
                         await _handleRepayment(parentContext, cardLiabilities, entered);
+
+                          // Automatically record transfer in transactions page
+                          try {
+                            final transactionVM = parentContext.read<TransactionViewModel>();
+                            final now = DateTime.now();
+                            // Withdrawal from bank asset
+                            final withdrawalTransaction = TransactionModel(
+                              id: const Uuid().v4(),
+                              userId: transactionVM.currentUserId ?? '',
+                              amount: entered,
+                              type: TransactionType.expense,
+                              category: 'Transfer',
+                              description: 'Credit card repayment to ${widget.card.name}',
+                              date: now,
+                              paymentMethod: src.name,
+                              isRecurring: false,
+                            );
+                            // Deposit to credit card
+                            final depositTransaction = TransactionModel(
+                              id: const Uuid().v4(),
+                              userId: transactionVM.currentUserId ?? '',
+                              amount: entered,
+                              type: TransactionType.income,
+                              category: 'Transfer',
+                              description: 'Credit card repayment from ${src.name}',
+                              date: now,
+                              paymentMethod: widget.card.name,
+                              isRecurring: false,
+                            );
+                            await transactionVM.addTransaction(withdrawalTransaction);
+                            await transactionVM.addTransaction(depositTransaction);
+                          } catch (e) {
+                            debugPrint('Failed to record repayment transfer transaction: $e');
+                          }
+
                         if (mounted) setState(() => _isRepayLoading = false);
-                        
-                        // Use parentContext instead of context for the toast
                         if (parentContext.mounted) {
                           ToastUtils.showSuccessToast(parentContext, 
                             title: local.success, 
                             description: local.repaymentSuccessful);
                         }
-                        // Refresh the card data from the viewmodel to update the UI
-                        final accountCardVM = parentContext.read<AccountCardViewModel>();
-                        final updatedCard = accountCardVM.accountCards.firstWhere(
+                          final accountCardVM2 = parentContext.read<AccountCardViewModel>();
+                          final updatedCard = accountCardVM2.accountCards.firstWhere(
                           (c) => c.id == widget.card.id,
                           orElse: () => widget.card,
                         );
@@ -346,6 +465,10 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
   Future<void> _handleRepayment(BuildContext context, List<AssetLiabilityModel> cardLiabilities, double repayAmount) async {
     final assetLiabilityVM = context.read<AssetLiabilityViewModel>();
     final accountCardVM = context.read<AccountCardViewModel>();
+    final latestCard = accountCardVM.accountCards.firstWhere(
+      (c) => c.id == widget.card.id,
+      orElse: () => widget.card,
+    );
     double remaining = repayAmount;
     for (final liability in cardLiabilities) {
       if (remaining <= 0) break;
@@ -353,11 +476,16 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
       final newAmount = liability.amount - pay;
       final updated = liability.recordHistory(newAmount >= 0 ? newAmount : 0);
       await assetLiabilityVM.updateAssetLiability(updated);
+      if (updated.amount == 0) {
+        await assetLiabilityVM.deleteAssetLiability(updated.id);
+      }
       remaining -= pay;
     }
-    final card = widget.card;
-    final updatedCard = card.copyWith(balance: card.balance + repayAmount);
+    final updatedCard = latestCard.copyWith(balance: latestCard.balance + repayAmount);
     await accountCardVM.updateAccountCard(updatedCard);
+    if (mounted) setState(() {
+      _card = updatedCard;
+    });
     if (mounted) setState(() {});
   }
 
@@ -376,6 +504,7 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
 
   void _deleteCard(BuildContext context) {
     final viewModel = context.read<AccountCardViewModel>();
+    final assetLiabilityVM = context.read<AssetLiabilityViewModel>();
     final localizations = AppLocalizations.of(context);
     showDialog(
       context: context,
@@ -394,6 +523,13 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
               Navigator.pop(dialogContext);
 
               try {
+                // Delete all liabilities for this card
+                final liabilitiesToDelete = assetLiabilityVM.liabilities.where(
+                  (l) => l.type == 'Credit Card' && l.cardId == widget.card.id
+                ).toList();
+                for (final liability in liabilitiesToDelete) {
+                  await assetLiabilityVM.deleteAssetLiability(liability.id);
+                }
                 // Delete the card
                 await viewModel.deleteAccountCard(widget.card.id);
 

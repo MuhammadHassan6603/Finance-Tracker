@@ -6,6 +6,9 @@ import '../data/models/transaction_model.dart';
 import 'package:collection/collection.dart';
 import '../viewmodels/auth_viewmodel.dart';
 import '../core/services/notification_settings_service.dart';
+import '../viewmodels/account_card_viewmodel.dart';
+import '../viewmodels/credit_card_statement_viewmodel.dart';
+import '../data/repositories/account_card_repository.dart';
 
 class TransactionViewModel extends ChangeNotifier {
   final TransactionRepository _repository;
@@ -30,12 +33,6 @@ class TransactionViewModel extends ChangeNotifier {
   TransactionType? _filterType;
   String? _filterPaymentMethod;
 
-  // Add new fields for caching
-  final Map<String, List<TransactionModel>> _monthlyCache = {};
-  bool _hasLoadedData = false;
-  DateTime? _lastLoadedDate;
-  static const int _cacheExpiryHours = 1;
-
   TransactionViewModel({
     required AuthViewModel authViewModel,
     required NotificationSettingsService settingsService,
@@ -49,18 +46,37 @@ class TransactionViewModel extends ChangeNotifier {
   }
 
   // Getters
-  List<TransactionModel> get transactions => _transactions;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
-  String? get currentUserId => _authViewModel.currentUser?.id;
-  DateTime get selectedMonth => _selectedMonth;
+  List<TransactionModel> get transactions {
+    print('[TransactionViewModel] get transactions: count = \\${_transactions.length}');
+    return _transactions;
+  }
+  bool get isLoading {
+    print('[TransactionViewModel] get isLoading: \\$_isLoading');
+    return _isLoading;
+  }
+  String? get error {
+    print('[TransactionViewModel] get error: \\$_error');
+    return _error;
+  }
+  String? get currentUserId {
+    print('[TransactionViewModel] get currentUserId: \\${_authViewModel.currentUser?.id}');
+    return _authViewModel.currentUser?.id;
+  }
+  DateTime get selectedMonth {
+    print('[TransactionViewModel] get selectedMonth: \\$_selectedMonth');
+    return _selectedMonth;
+  }
 
   // Filtered transactions for selected month
-  List<TransactionModel> get filteredTransactions => _transactions
+  List<TransactionModel> get filteredTransactions {
+    final filtered = _transactions
       .where((t) =>
           t.date.month == _selectedMonth.month &&
           t.date.year == _selectedMonth.year)
       .toList();
+    print('[TransactionViewModel] get filteredTransactions: month=\\${_selectedMonth.month}, year=\\${_selectedMonth.year}, count=\\${filtered.length}');
+    return filtered;
+  }
 
   // Monthly totals
   double get totalIncome => filteredTransactions
@@ -74,47 +90,33 @@ class TransactionViewModel extends ChangeNotifier {
   double get availableBalance => totalIncome - totalExpense;
 
   void _init() {
+    print('[TransactionViewModel] _init called');
     if (_authViewModel.currentUser != null) {
       loadTransactionsForMonth(_selectedMonth);
     }
   }
 
-  void setSelectedMonth(DateTime month) {
+  Future<void> setSelectedMonth(DateTime month) async {
+    print('[TransactionViewModel] setSelectedMonth: month=\\${month.month}, year=\\${month.year}');
     _selectedMonth = DateTime(month.year, month.month, 1);
-    loadTransactionsForMonth(_selectedMonth);
+    await loadTransactionsForMonth(_selectedMonth);
     notifyListeners();
   }
 
-  // Add method to check if cache is valid
-  bool _isCacheValid(DateTime date) {
-    if (!_hasLoadedData || _lastLoadedDate == null) return false;
-    
-    final cacheKey = '${date.year}-${date.month}';
-    if (!_monthlyCache.containsKey(cacheKey)) return false;
-    
-    final cacheAge = DateTime.now().difference(_lastLoadedDate!);
-    return cacheAge.inHours < _cacheExpiryHours;
-  }
-
-  // Modify loadTransactionsForMonth to use cache
   Future<void> loadTransactionsForMonth(DateTime month) async {
-    if (currentUserId == null) return;
-
-    final cacheKey = '${month.year}-${month.month}';
-    
-    // Return cached data if valid
-    if (_isCacheValid(month)) {
-      _transactions = _monthlyCache[cacheKey]!;
-      notifyListeners();
+    print('[TransactionViewModel] loadTransactionsForMonth: month=\\${month.month}, year=\\${month.year}');
+    if (currentUserId == null) {
+      print('[TransactionViewModel] No current user ID available');
       return;
     }
-
     try {
       _setLoading(true);
       _error = null;
 
       final startDate = DateTime(month.year, month.month, 1);
-      final endDate = DateTime(month.year, month.month + 1, 0);
+      final endDate = DateTime(month.year, month.month + 1, 0, 23, 59, 59);
+
+      print('[TransactionViewModel] Fetching from repo: startDate=\\$startDate, endDate=\\$endDate');
 
       final transactions = await _repository.getTransactions(
         userId: currentUserId!,
@@ -122,19 +124,22 @@ class TransactionViewModel extends ChangeNotifier {
         endDate: endDate,
       );
 
-      // Update cache
-      _monthlyCache[cacheKey] = transactions;
-      _transactions = transactions;
-      _lastLoadedDate = DateTime.now();
-      _hasLoadedData = true;
+      print('[TransactionViewModel] Loaded \\${transactions.length} transactions from repo');
 
+      _transactions = transactions;
       notifyListeners();
     } catch (e) {
+      print('[TransactionViewModel] Error loading transactions: \\$e');
       _error = e.toString();
       notifyListeners();
     } finally {
       _setLoading(false);
     }
+  }
+
+  Future<void> refreshCurrentMonth() async {
+    print('[TransactionViewModel] refreshCurrentMonth called');
+    await loadTransactionsForMonth(_selectedMonth);
   }
 
   Map<String, dynamic> getMonthlyStatistics() {
@@ -288,8 +293,8 @@ class TransactionViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Fixed addTransaction method with proper null checking
   Future<bool> addTransaction(TransactionModel transaction) async {
+    print('[TransactionViewModel] addTransaction called');
     if (currentUserId == null) return false;
 
     try {
@@ -309,6 +314,16 @@ class TransactionViewModel extends ChangeNotifier {
       _availableBalance = _totalIncome - _totalExpense;
 
       _transactions.insert(0, newTransaction);
+
+      // Update credit card statement if needed
+      if (transaction.paymentMethod.isNotEmpty) {
+        try {
+          await _updateStatementForTransaction(transaction);
+        } catch (e) {
+          print('Error updating statement for transaction: $e');
+          // Don't fail the transaction if statement update fails
+        }
+      }
 
       // Only schedule notifications if bill payment notifications are enabled
       if (transaction.isRecurring && 
@@ -333,13 +348,73 @@ class TransactionViewModel extends ChangeNotifier {
     }
   }
 
+  Future<void> _updateStatementForTransaction(TransactionModel transaction) async {
+    try {
+      print('Updating statement for transaction: ${transaction.description} - ${transaction.amount}');
+      
+      // Get card information from the repository
+      final accountCardRepo = AccountCardRepository();
+      final cardsStream = accountCardRepo.getAccountCards(currentUserId!);
+      final cards = await cardsStream.first;
+      final card = cards.firstWhereOrNull((c) => c.name == transaction.paymentMethod && c.type == 'Credit Card');
+      
+      if (card != null) {
+        print('Found credit card: ${card.name} with ID: ${card.id}');
+        final statementVM = CreditCardStatementViewModel();
+        final currentStatement = await statementVM.getCurrentStatement(card.id);
+        
+        if (currentStatement != null) {
+          print('Found current statement for card ${card.name}');
+          final isRepayment = transaction.type == TransactionType.income && 
+                             transaction.description.toLowerCase().contains('repay');
+          
+          final updatedTransactions = List<TransactionModel>.from(currentStatement.transactions);
+          final updatedRepayments = List<TransactionModel>.from(currentStatement.repayments);
+          double closingBalance = currentStatement.closingBalance;
+          
+          if (isRepayment) {
+            print('Adding repayment transaction: ${transaction.amount}');
+            updatedRepayments.add(transaction);
+            closingBalance -= transaction.amount;
+          } else if (transaction.type == TransactionType.expense) {
+            print('Adding expense transaction: ${transaction.amount}');
+            updatedTransactions.add(transaction);
+            closingBalance += transaction.amount;
+          }
+          
+          print('Updated statement - Transactions: ${updatedTransactions.length}, Repayments: ${updatedRepayments.length}, Closing Balance: $closingBalance');
+          
+          await statementVM.addOrUpdateStatement(currentStatement.copyWith(
+            transactions: updatedTransactions,
+            repayments: updatedRepayments,
+            closingBalance: closingBalance,
+          ));
+          
+          print('Successfully updated statement for card ${card.name}');
+        } else {
+          print('No current statement found for card ${card.name} - creating initial statement');
+          // Create initial statement if none exists
+          await statementVM.createInitialStatementForCard(card, card.balance);
+          // Try to update again
+          await _updateStatementForTransaction(transaction);
+        }
+      } else {
+        print('No credit card found for payment method: ${transaction.paymentMethod}');
+        print('Available cards: ${cards.map((c) => '${c.name} (${c.type})').join(', ')}');
+      }
+    } catch (e) {
+      print('Error in _updateStatementForTransaction: $e');
+      rethrow;
+    }
+  }
+
   void handleError(Object error, StackTrace stackTrace) {
     _error = error.toString();
     notifyListeners();
   }
 
-  // Fixed updateTransaction method with proper null checking
   Future<bool> updateTransaction(TransactionModel transaction) async {
+    print('[TransactionViewModel] updateTransaction called');
     try {
       _setLoading(true);
       _error = null;
@@ -347,7 +422,7 @@ class TransactionViewModel extends ChangeNotifier {
       await _repository.updateTransaction(transaction);
 
       // Reload all transactions to recalculate totals
-      await _loadTotals();
+      await loadTransactionsForMonth(_selectedMonth);
 
       final index = _transactions.indexWhere((t) => t.id == transaction.id);
       if (index != -1) {
@@ -381,8 +456,8 @@ class TransactionViewModel extends ChangeNotifier {
     }
   }
 
-  // Fixed deleteTransaction method with proper null checking
   Future<bool> deleteTransaction(String id) async {
+    print('[TransactionViewModel] deleteTransaction called');
     try {
       _setLoading(true);
       _error = null;
@@ -444,11 +519,13 @@ class TransactionViewModel extends ChangeNotifier {
   }
 
   void _setLoading(bool value) {
+    print('[TransactionViewModel] _setLoading: value=\\$value');
     _isLoading = value;
     notifyListeners();
   }
 
   void clearError() {
+    print('[TransactionViewModel] clearError called');
     _error = null;
     notifyListeners();
   }
@@ -609,17 +686,7 @@ class TransactionViewModel extends ChangeNotifier {
     }
   }
 
-  // Add method to clear cache
-  void clearCache() {
-    _monthlyCache.clear();
-    _hasLoadedData = false;
-    _lastLoadedDate = null;
-  }
-
-  // Add method to refresh data
   Future<void> refreshTransactions() async {
-    if (_lastLoadedDate == null) return;
-    clearCache();
     await loadTransactionsForMonth(_selectedMonth);
   }
 
